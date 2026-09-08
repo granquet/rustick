@@ -1,9 +1,9 @@
 use clap::Parser;
-use std::fs::File;
 use rodio::{Decoder, MixerDeviceSink, Source, source::Buffered};
+use std::error::Error;
+use std::fs::File;
 use std::io::{self, BufReader, Write};
 use std::path::PathBuf;
-use std::error::Error;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -44,7 +44,11 @@ impl Click {
         let decoder = Decoder::try_from(file).expect("decoder");
         let buffer = decoder.buffered();
 
-        Ok(Self { name, buffer, stream })
+        Ok(Self {
+            name,
+            buffer,
+            stream,
+        })
     }
 
     fn play(&self) {
@@ -56,13 +60,15 @@ impl Click {
 
 impl Bar {
     fn play(&self) {
-
-        let tempo_millis : u64 = ((1000 * 60 / self.tempo) as f32 * ( 4.0 / self.unit as f32)) as u64;
+        let tempo_millis: u64 = ((1000 * 60 / self.tempo) as f32 * (4.0 / self.unit as f32)) as u64;
         print!("|");
         let _ = io::stdout().flush();
         for note in 0..self.nnotes {
             if note >= self.accents.len() {
-                self.accents.last().expect("couldn't get last element").play();
+                self.accents
+                    .last()
+                    .expect("couldn't get last element")
+                    .play();
             } else {
                 self.accents[note].play();
             }
@@ -74,8 +80,18 @@ impl Bar {
 impl Song {
     fn play(self) {
         match self.loops {
-            Some(x) => for _ in 0..x { for bar in &self.bars { bar.play() } }
-            None => loop { for bar in &self.bars { bar.play() } }
+            Some(x) => {
+                for _ in 0..x {
+                    for bar in &self.bars {
+                        bar.play()
+                    }
+                }
+            }
+            None => loop {
+                for bar in &self.bars {
+                    bar.play()
+                }
+            },
         }
         println!("|");
     }
@@ -94,7 +110,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             'x' => PathBuf::from("./res/Perc_Can_lo.wav"),
             _ => PathBuf::from("./res/Perc_Chair_lo.wav"),
         };
-        let click = Click::init(pid.into(), path, Arc::clone(&stream_handle)).expect("creating click");
+        let click =
+            Click::init(pid.into(), path, Arc::clone(&stream_handle)).expect("creating click");
         clicks.push(click);
     }
 
@@ -106,7 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let song = Song {
-        bars: vec!(bar),
+        bars: vec![bar],
         loops: args.bars,
     };
 
