@@ -1,14 +1,15 @@
-pub enum Event {
-    Click(String),
-    Bar(u32),
-}
-
+use std::fmt;
 use rodio::{Decoder, MixerDeviceSink, Source, source::Buffered};
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
+
+pub enum Event {
+    Click(String),
+    Bar(u32),
+}
 
 pub enum ClickKind {
     Accent,
@@ -45,6 +46,28 @@ pub struct Song {
     pub tx: mpsc::Sender<Event>,
 }
 
+impl fmt::Display for ClickKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ClickKind::Accent => write!(f, "X"),
+            ClickKind::Normal => write!(f, "x"),
+            ClickKind::Upbeat => write!(f, "-"),
+            ClickKind::Rest => write!(f, "."),
+        }
+    }
+}
+
+impl From<char> for ClickKind {
+    fn from(value: char) -> Self {
+        match value {
+            'X' => ClickKind::Accent,
+            'x' => ClickKind::Normal,
+            '-' => ClickKind::Upbeat,
+            _ => ClickKind::Rest,
+        }
+    }
+}
+
 impl Clicks {
     pub fn init(
         accent: PathBuf,
@@ -56,19 +79,19 @@ impl Clicks {
 
         Ok(Self {
             accent: Click::init(
-                "X".to_string(),
+                ClickKind::Accent.to_string(),
                 accent,
                 Arc::clone(&stream_handle),
                 tx.clone(),
             )?,
             normal: Click::init(
-                "x".to_string(),
+                ClickKind::Normal.to_string(),
                 normal,
                 Arc::clone(&stream_handle),
                 tx.clone(),
             )?,
             upbeat: Click::init(
-                "-".to_string(),
+                ClickKind::Upbeat.to_string(),
                 upbeat,
                 Arc::clone(&stream_handle),
                 tx.clone(),
@@ -106,7 +129,6 @@ impl Click {
 
     pub fn play(&self) {
         self.stream.mixer().add(self.buffer.clone());
-        let _ = self.tx.send(Event::Click(self.name.clone()));
     }
 }
 
@@ -114,13 +136,9 @@ impl Bar {
     pub fn play(&self) {
         let tempo_millis: u64 = ((1000 * 60 / self.tempo) as f32 * (4.0 / self.unit as f32)) as u64;
         let _ = self.tx.send(Event::Bar(42));
-        for note in 0..self.nnotes {
-            if note >= self.accents.len() {
-                self.clicks
-                    .play(self.accents.last().expect("couldn't get last element"))
-            } else {
-                self.clicks.play(&self.accents[note]);
-            }
+        for click in &self.accents {
+            let _ = self.tx.send(Event::Click(click.to_string()));
+            self.clicks.play(click);
             std::thread::sleep(std::time::Duration::from_millis(tempo_millis));
         }
     }

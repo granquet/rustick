@@ -1,11 +1,10 @@
 use clap::Parser;
 use std::error::Error;
-use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::mpsc;
 
 pub mod sequencer;
-use crate::sequencer::Event;
+pub mod terminal;
 use crate::sequencer::{Bar, ClickKind, Clicks, Song};
 
 #[derive(Parser, Debug)]
@@ -29,13 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut clicks = Vec::new();
 
     for pid in args.pattern.chars() {
-        let click = match pid {
-            'X' => ClickKind::Accent,
-            'x' => ClickKind::Normal,
-            '-' => ClickKind::Upbeat,
-            _ => ClickKind::Rest,
-        };
-        clicks.push(click);
+        clicks.push(ClickKind::from(pid));
     }
 
     let bar = Bar {
@@ -62,13 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         song.play();
     });
 
-    for event in rx {
-        match event {
-            Event::Click(click) => print!("{}", click),
-            Event::Bar(_) => print!("|"),
-        }
-        let _ = io::stdout().flush();
-    }
+    terminal::run(rx, args.pattern.len() as i32);
 
     Ok(())
 }
