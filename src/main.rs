@@ -1,12 +1,12 @@
 use clap::Parser;
-use std::io::{self, Write};
 use std::error::Error;
+use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 
 pub mod sequencer;
 use crate::sequencer::Event;
-use crate::sequencer::sequencer::{Click, Bar, Song};
+use crate::sequencer::{Bar, ClickKind, Clicks, Song};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -22,22 +22,19 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-
     let (tx, rx) = mpsc::channel();
-    let stream_handle = Arc::new(rodio::DeviceSinkBuilder::open_default_sink()?);
 
     let args = Args::parse();
 
     let mut clicks = Vec::new();
 
     for pid in args.pattern.chars() {
-        let path = match pid {
-            'X' => PathBuf::from("./res/Perc_Can_hi.wav"),
-            'x' => PathBuf::from("./res/Perc_Can_lo.wav"),
-            _ => PathBuf::from("./res/Perc_Chair_lo.wav"),
+        let click = match pid {
+            'X' => ClickKind::Accent,
+            'x' => ClickKind::Normal,
+            '-' => ClickKind::Upbeat,
+            _ => ClickKind::Rest,
         };
-        let click =
-            Click::init(pid.into(), path, Arc::clone(&stream_handle), tx.clone()).expect("creating click");
         clicks.push(click);
     }
 
@@ -46,6 +43,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         unit: args.unit,
         nnotes: args.pattern.len(),
         accents: clicks,
+        clicks: Clicks::init(
+            PathBuf::from("./res/Perc_Can_hi.wav"),
+            PathBuf::from("./res/Perc_Can_lo.wav"),
+            PathBuf::from("./res/Perc_Chair_lo.wav"),
+            tx.clone(),
+        )?,
         tx: tx.clone(),
     };
 
