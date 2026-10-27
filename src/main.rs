@@ -3,6 +3,7 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
+mod gui;
 pub mod sequencer;
 pub mod terminal;
 use crate::sequencer::{Bar, ClickKind, Clicks, Song};
@@ -18,6 +19,8 @@ struct Args {
     unit: u32,
     #[arg(short, long, default_value_t = "Xxxx".into())]
     pattern: String,
+    #[arg(long, default_value_t = false)]
+    gui: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -55,7 +58,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         song.play();
     });
 
-    terminal::run(rx, args.pattern.len() as i32);
+    if args.gui {
+        gui::run(rx, args.pattern.len() as i32);
+    } else {
+        terminal::run(rx, args.pattern.len() as i32);
+    }
 
     Ok(())
 }

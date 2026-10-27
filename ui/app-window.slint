@@ -1,0 +1,64 @@
+// Builds a "sector"
+component Sector inherits Path {
+    in property <angle> angle: 90deg;
+    in property <float> r: 80;
+    in property <bool> lit: false;
+    property <float> inner: root.r / 2;
+
+    viewbox-width: 2 * root.r;
+    viewbox-height: 2 * root.r;
+    MoveTo { x: root.r; y: 0; }
+    ArcTo {
+        x: root.r + root.r * Math.sin(root.angle - 1deg);
+        y: root.r - root.r * Math.cos(root.angle - 1deg);
+        radius-x: root.r;
+        radius-y: root.r;
+        large-arc: root.angle > 180deg;
+        sweep: true;
+    }
+    LineTo {
+        x: root.r + root.inner * Math.sin(root.angle - 1deg);
+        y: root.r - root.inner * Math.cos(root.angle - 1deg);
+    }
+    ArcTo {
+        x: root.r;
+        y: root.r - root.inner;
+        radius-x: root.inner;
+        radius-y: root.inner;
+        large-arc: root.angle > 180deg;
+        sweep: false;
+    }
+    Close {}
+}
+
+// a Wheel is an arrangement of sectors
+component Wheel {
+    in property <int> divisions;
+    in property <int> active;
+
+    for i in divisions : Sector {
+        width: 200px;
+        height: 200px;
+        angle: 360deg / divisions;
+        fill: active == i ? oklch(0.85, 0.20, 0.80*i*360/divisions) : 
+        oklch(0.60, 0.20, 0.80*i*360/divisions);
+        stroke: active == i ? #1e3a8a : transparent;
+        stroke-width: 2px;
+        transform-rotation: i*360deg/divisions;
+    }
+}
+
+export component MainWindow inherits Window {
+    width: 250px;
+    height: 250px;
+    background: #f0f0f0;
+    in property <int> active: -1;
+    in-out property <int> divisions: 4;
+
+    VerticalLayout {
+        inner := Wheel {
+            active: root.active;
+            divisions: root.divisions;
+        }
+    }
+}
