@@ -1,5 +1,5 @@
-use std::fmt;
 use rodio::{Decoder, MixerDeviceSink, Source, source::Buffered};
+use std::fmt;
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::PathBuf;
@@ -7,10 +7,11 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 pub enum Event {
-    Click(String),
+    Click(ClickKind),
     Bar(u32),
 }
 
+#[derive(Copy, Clone)]
 pub enum ClickKind {
     Accent,
     Normal,
@@ -137,7 +138,7 @@ impl Bar {
         let tempo_millis: u64 = ((1000 * 60 / self.tempo) as f32 * (4.0 / self.unit as f32)) as u64;
         let _ = self.tx.send(Event::Bar(42));
         for click in &self.accents {
-            let _ = self.tx.send(Event::Click(click.to_string()));
+            let _ = self.tx.send(Event::Click(*click));
             self.clicks.play(click);
             std::thread::sleep(std::time::Duration::from_millis(tempo_millis));
         }
