@@ -6,7 +6,7 @@ use std::sync::mpsc;
 mod gui;
 pub mod sequencer;
 pub mod terminal;
-use crate::sequencer::{Bar, ClickKind, Clicks, Song};
+use crate::sequencer::{Bar, ClickKind, Clicks, Sequencer, Song};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -39,23 +39,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         unit: args.unit,
         nnotes: args.pattern.len(),
         accents: clicks,
-        clicks: Clicks::init(
-            PathBuf::from("./res/Perc_Can_hi.wav"),
-            PathBuf::from("./res/Perc_Can_lo.wav"),
-            PathBuf::from("./res/Perc_Chair_lo.wav"),
-            tx.clone(),
-        )?,
-        tx: tx.clone(),
     };
 
     let song = Song {
         bars: vec![bar],
         loops: args.bars,
-        tx: tx.clone(),
+        clicks: Clicks::init(
+            PathBuf::from("./res/Perc_Can_hi.wav"),
+            PathBuf::from("./res/Perc_Can_lo.wav"),
+            PathBuf::from("./res/Perc_Chair_lo.wav"),
+        )?,
     };
 
+    let sequencer = Sequencer::new(song, tx.clone());
+
     std::thread::spawn(move || {
-        song.play();
+        sequencer.run();
     });
 
     if args.gui {

@@ -1,10 +1,11 @@
-use rodio::{Decoder, MixerDeviceSink, Source, source::Buffered};
+use rodio::{ChannelCount, Decoder, MixerDeviceSink, Sample, SampleRate, Source, source::Buffered};
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
+use std::time::Duration;
 
 pub enum Event {
     Click(ClickKind),
@@ -22,8 +23,6 @@ pub enum ClickKind {
 pub struct Click {
     pub name: String,
     pub buffer: Buffered<Decoder<BufReader<File>>>,
-    pub stream: Arc<MixerDeviceSink>,
-    pub tx: mpsc::Sender<Event>,
 }
 
 pub struct Clicks {
@@ -37,14 +36,23 @@ pub struct Bar {
     pub unit: u32,
     pub nnotes: usize,
     pub accents: Vec<ClickKind>,
-    pub clicks: Clicks,
-    pub tx: mpsc::Sender<Event>,
 }
 
 pub struct Song {
     pub bars: Vec<Bar>,
     pub loops: Option<u32>,
-    pub tx: mpsc::Sender<Event>,
+    pub clicks: Clicks,
+}
+
+pub struct Sequencer {
+    sr: u32,
+    pos: u64,
+    next_click: f64,
+    song: Song,
+    bar: usize,
+    accent: usize,
+    sink: Arc<MixerDeviceSink>,
+    tx: mpsc::Sender<Event>,
 }
 
 impl fmt::Display for ClickKind {
@@ -70,97 +78,101 @@ impl From<char> for ClickKind {
 }
 
 impl Clicks {
-    pub fn init(
-        accent: PathBuf,
-        normal: PathBuf,
-        upbeat: PathBuf,
-        tx: mpsc::Sender<Event>,
-    ) -> io::Result<Self> {
-        let stream_handle = Arc::new(rodio::DeviceSinkBuilder::open_default_sink().unwrap());
-
+    pub fn init(accent: PathBuf, normal: PathBuf, upbeat: PathBuf) -> io::Result<Self> {
         Ok(Self {
-            accent: Click::init(
-                ClickKind::Accent.to_string(),
-                accent,
-                Arc::clone(&stream_handle),
-                tx.clone(),
-            )?,
-            normal: Click::init(
-                ClickKind::Normal.to_string(),
-                normal,
-                Arc::clone(&stream_handle),
-                tx.clone(),
-            )?,
-            upbeat: Click::init(
-                ClickKind::Upbeat.to_string(),
-                upbeat,
-                Arc::clone(&stream_handle),
-                tx.clone(),
-            )?,
+            accent: Click::init(ClickKind::Accent.to_string(), accent)?,
+            normal: Click::init(ClickKind::Normal.to_string(), normal)?,
+            upbeat: Click::init(ClickKind::Upbeat.to_string(), upbeat)?,
         })
     }
-    pub fn play(&self, kind: &ClickKind) {
+    pub fn get(&self, kind: &ClickKind) -> Option<Buffered<Decoder<BufReader<File>>>> {
         match kind {
-            ClickKind::Accent => self.accent.play(),
-            ClickKind::Normal => self.normal.play(),
-            ClickKind::Upbeat => self.upbeat.play(),
-            ClickKind::Rest => (),
+            ClickKind::Accent => Some(self.accent.get()),
+            ClickKind::Normal => Some(self.normal.get()),
+            ClickKind::Upbeat => Some(self.upbeat.get()),
+            ClickKind::Rest => None,
         }
     }
 }
 
 impl Click {
-    pub fn init(
-        name: String,
-        path: PathBuf,
-        stream: Arc<MixerDeviceSink>,
-        tx: mpsc::Sender<Event>,
-    ) -> io::Result<Self> {
+    pub fn init(name: String, path: PathBuf) -> io::Result<Self> {
         let file = File::open(&path)?;
         let decoder = Decoder::try_from(file).expect("decoder");
         let buffer = decoder.buffered();
 
-        Ok(Self {
-            name,
-            buffer,
-            stream,
-            tx,
-        })
+        Ok(Self { name, buffer })
     }
 
-    pub fn play(&self) {
-        self.stream.mixer().add(self.buffer.clone());
-    }
-}
-
-impl Bar {
-    pub fn play(&self) {
-        let tempo_millis: u64 = ((1000 * 60 / self.tempo) as f32 * (4.0 / self.unit as f32)) as u64;
-        let _ = self.tx.send(Event::Bar(42));
-        for click in &self.accents {
-            let _ = self.tx.send(Event::Click(*click));
-            self.clicks.play(click);
-            std::thread::sleep(std::time::Duration::from_millis(tempo_millis));
-        }
+    pub fn get(&self) -> Buffered<Decoder<BufReader<File>>> {
+        self.buffer.clone()
     }
 }
 
 impl Song {
-    pub fn play(self) {
-        match self.loops {
-            Some(x) => {
-                for _ in 0..x {
-                    for bar in &self.bars {
-                        bar.play()
-                    }
-                }
+    pub fn get(&self, bar: usize, accent: usize) -> &ClickKind {
+        self.bars.get(bar).unwrap().accents.get(accent).unwrap()
+    }
+}
+
+impl Iterator for Sequencer {
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Sample> {
+        if self.pos as f64 >= self.next_click {
+            let click_kind = self.song.get(self.bar, self.accent);
+            if self.accent == 0 {
+                let _ = self.tx.send(Event::Bar(self.bar as u32));
             }
-            None => loop {
-                for bar in &self.bars {
-                    bar.play()
-                }
-            },
+
+            let _ = self.tx.send(Event::Click(*click_kind));
+
+            if let Some(click) = self.song.clicks.get(click_kind) {
+                self.sink.mixer().add(click);
+            }
+
+            self.accent = (self.accent + 1) % self.song.bars.get(self.bar).unwrap().accents.len();
+            let bpm = self.song.bars.get(self.bar).unwrap().tempo as f64;
+            self.next_click += self.sr as f64 * 60.0 / bpm;
         }
-        let _ = self.tx.send(Event::Bar(42));
+        self.pos += 1;
+        Some(0.0) // silence: the clicks come from the queued sources
+    }
+}
+
+impl Source for Sequencer {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> ChannelCount {
+        ChannelCount::new(1).unwrap()
+    }
+    fn sample_rate(&self) -> SampleRate {
+        SampleRate::new(self.sr).unwrap()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
+impl Sequencer {
+    pub fn new(song: Song, tx: mpsc::Sender<Event>) -> Self {
+        let sink = Arc::new(rodio::DeviceSinkBuilder::open_default_sink().unwrap());
+        let sr = sink.config().sample_rate().get(); // match the device: no resampling
+        Self {
+            sr,
+            pos: 0,
+            next_click: 0.0,
+            song,
+            bar: 0,
+            accent: 0,
+            sink: Arc::clone(&sink),
+            tx,
+        }
+    }
+
+    pub fn run(self) {
+        self.sink.clone().mixer().add(self);
+        std::thread::park();
     }
 }
